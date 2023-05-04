@@ -49,7 +49,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
                 ),
         }
 )
-public class AstraQuery extends Task implements RunnableTask<AstraQuery.Output>, IQueryable {
+public class AstraQuery extends Task implements RunnableTask<AstraOutput>, IQueryable {
     @Schema(
         title = "The Astra DB session connection configurations",
         description = "The Astra DB session connection configurations"
@@ -84,7 +84,7 @@ public class AstraQuery extends Task implements RunnableTask<AstraQuery.Output>,
     private boolean fetchOne = false;
 
     @Override
-    public AstraQuery.Output run(RunContext runContext) throws Exception {
+    public AstraOutput run(RunContext runContext) throws Exception {
         // variable initialization. in future from UI.
         String keyspace = runContext.render(this.keyspace);
         String clientId = runContext.render(this.clientId);
@@ -102,20 +102,20 @@ public class AstraQuery extends Task implements RunnableTask<AstraQuery.Output>,
             // Execute the cql query
             ResultSet rs = session.execute(cql);
             ColumnDefinitions columnDefinitions = rs.getColumnDefinitions();
-            // Create output builder
-            Output.OutputBuilder outputBuilder = Output.builder()
+            AstraOutput.AstraOutputBuilder astraOutputBuilder;
+            astraOutputBuilder = AstraOutput.builder()
                     .bytes(rs.getExecutionInfo().getResponseSizeInBytes());
 
             // handle various scenarios
             if (this.fetchOne) {
-                handleFetchOne(rs, columnDefinitions, outputBuilder);
+                handleFetchOne(rs, columnDefinitions, astraOutputBuilder);
             } else if (this.store) {
-                handleFetchStore(runContext, rs, columnDefinitions, outputBuilder);
+                handleFetchStore(runContext, rs, columnDefinitions, astraOutputBuilder);
             } else if (this.fetch) {
-                handleFetchWithLimit(rs, columnDefinitions, outputBuilder);
+                handleFetchWithLimit(rs, columnDefinitions, astraOutputBuilder);
             }
             // building the output of the task
-            Output output = outputBuilder.build();
+            AstraOutput output = astraOutputBuilder.build();
 
             if (output.getSize() != null) {
                 runContext.metric(Counter.of("fetch.size", output.getSize()));
@@ -129,7 +129,7 @@ public class AstraQuery extends Task implements RunnableTask<AstraQuery.Output>,
         }
     }
 
-    private static void handleFetchWithLimit(ResultSet rs, ColumnDefinitions columnDefinitions, Output.OutputBuilder outputBuilder) {
+    private static void handleFetchWithLimit(ResultSet rs, ColumnDefinitions columnDefinitions, AstraOutput.AstraOutputBuilder outputBuilder) {
         List<Map<String, Object>> maps = new ArrayList<>();
         rs.forEach(row -> maps.add(AstraHelper.convertRow(row, columnDefinitions)));
 
@@ -138,7 +138,7 @@ public class AstraQuery extends Task implements RunnableTask<AstraQuery.Output>,
                 .size((long) maps.size());
     }
 
-    private static void handleFetchStore(RunContext runContext, ResultSet rs, ColumnDefinitions columnDefinitions, Output.OutputBuilder outputBuilder) throws IOException {
+    private static void handleFetchStore(RunContext runContext, ResultSet rs, ColumnDefinitions columnDefinitions, AstraOutput.AstraOutputBuilder outputBuilder) throws IOException {
         File tempFile = runContext.tempFile(".ion").toFile();
         BufferedWriter fileWriter = new BufferedWriter(new FileWriter(tempFile));
         AtomicLong count = new AtomicLong();
@@ -157,46 +157,11 @@ public class AstraQuery extends Task implements RunnableTask<AstraQuery.Output>,
                 .size(count.get());
     }
 
-    private static void handleFetchOne(ResultSet rs, ColumnDefinitions columnDefinitions, Output.OutputBuilder outputBuilder) {
+    private static void handleFetchOne(ResultSet rs, ColumnDefinitions columnDefinitions, AstraOutput.AstraOutputBuilder outputBuilder) {
         outputBuilder
                 .row(AstraHelper.convertRow(rs.one(), columnDefinitions))
                 .size(1L);
     }
 
-    /**
-     * Input or Output can nested as you need
-     */
-    @Builder
-    @Getter
-    public static class Output implements io.kestra.core.models.tasks.Output {
-        @Schema(
-                title = "Map containing the first row of fetched data",
-                description = "Only populated if 'fetchOne' parameter is set to true."
-        )
-        private final Map<String, Object> row;
-
-        @Schema(
-                title = "Lit of map containing rows of fetched data",
-                description = "Only populated if 'fetch' parameter is set to true."
-        )
-        private final List<Map<String, Object>> rows;
-
-        @Schema(
-                title = "The url of the result file on kestra storage (.ion file / Amazon Ion text format)",
-                description = "Only populated if 'store' is set to true."
-        )
-        private final URI uri;
-
-        @Schema(
-                title = "The size of the fetched rows",
-                description = "Only populated if 'store' or 'fetch' parameter is set to true."
-        )
-        private final Long size;
-
-        @Schema(
-                title = "The size of the binary response in bytes."
-        )
-        private final Integer bytes;
-    }
 
 }
